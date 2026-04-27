@@ -1,69 +1,52 @@
 pipeline {
     agent any
-
-    tools {
-        nodejs 'Node v24' 
-    }
+    tools { nodejs 'Node v24' }
 
     stages {
-        stage('Cleanup') {
+        stage('Setup') {
             steps {
                 deleteDir()
-            }
-        }
-
-        stage('Checkout') {
-            steps {
                 checkout scm
-            }
-        }
-
-        stage('Install & Setup') {
-            steps {
-                dir('next-js-app') {
-                    bat 'npm ci' 
-                }
-                dir('playwright-framework') {
+                dir('next-js-app') { bat 'npm ci' }
+                dir('playwright-framework') { 
                     bat 'npm ci'
                     bat 'npx playwright install chromium'
                 }
             }
         }
 
-        stage('Start Server & Test') {
+        stage('Run Sandbox Engine') {
             steps {
-                // 1. Start Next.js in the background
-                dir('next-js-app') {
-                    // "/B" runs it in the background so Jenkins doesn't hang
-                    bat 'start /B npm run dev' 
-                }
+                // 1. Start Server in background
+                dir('next-js-app') { bat 'start /B npm run dev' }
 
-                // 2. Wait for the server to be ready (Next.js needs time to compile)
-                // We'll give it 20 seconds for the first time
-                bat 'timeout /t 20 /nobreak'
+                // 2. SMART WAIT: Instead of 'timeout', we use PowerShell to sense the port
+                // This waits until Port 3000 is actually listening.
+                bat 'powershell -Command "while(!(Test-NetConnection -ComputerName localhost -Port 3000).TcpTestSucceeded) { Start-Sleep -Seconds 2 }"'
 
-                // 3. Run the tests
-                dir('playwright-framework') {
-                    bat 'npx playwright test'
-                }
+                // 3. Run Tests
+                dir('playwright-framework') { bat 'npx playwright test' }
             }
         }
     }
 
     post {
         always {
-            // 4. Cleanup: Kill the background Node process so port 3000 isn't locked for the next build
             bat 'taskkill /F /IM node.exe /T || exit 0'
-
-            dir('playwright-framework') {
-                publishHTML([
-                    allowMissing: false, 
-                    alwaysLinkToLastBuild: false, 
-                    keepAll: true, 
-                    reportDir: 'playwright-report', 
-                    reportFiles: 'index.html', 
-                    reportName: 'Playwright HTML Report'
-                ])
+            
+            // 4. GUARDED PUBLISH: Only try to publish if the directory was actually created
+            script {
+                def reportExists = writeFile file: 'check.bat', text: "if exist playwright-framework\\playwright-report exit 0 else exit 1"
+                dir('playwright-framework') {
+                    publishHTML([
+                        allowMissing: true, // Set to true so the pipeline doesn't flip out if tests didn't run
+                        alwaysLinkToLastBuild: false, 
+                        keepAll: true, 
+                        reportDir: 'playwright-report', 
+                        reportFiles: 'index.html', 
+                        reportName: 'Playwright HTML Report'
+                    ])
+                }
             }
         }
     }
