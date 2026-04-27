@@ -2,32 +2,32 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'Node v24' // This must match the name in Jenkins Global Tool Configuration
+        // Ensure this matches the name in your Jenkins 'Global Tool Configuration'
+        nodejs 'Node v24' 
     }
 
     stages {
         stage('Cleanup') {
             steps {
-                // Ensure a clean slate before starting
                 deleteDir()
             }
         }
 
         stage('Checkout') {
             steps {
-                // Jenkins pulls the code from GitHub
                 checkout scm
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                // We use 'npm ci' instead of 'npm install' for CI/CD
                 dir('next-js-app') {
                     bat 'npm ci' 
                 }
                 dir('playwright-framework') {
                     bat 'npm ci'
+                    // NEW: Added to ensure the Legion has the actual browser engine
+                    bat 'npx playwright install chromium'
                 }
             }
         }
@@ -35,7 +35,6 @@ pipeline {
         stage('Run Playwright Tests') {
             steps {
                 dir('playwright-framework') {
-                    // We run headless since Jenkins doesn't have a monitor
                     bat 'npx playwright test'
                 }
             }
@@ -44,9 +43,15 @@ pipeline {
 
     post {
         always {
-            // Harvest the evidence (Artifacts)
             dir('playwright-framework') {
-                publishHTML([allowMissing: false, alwaysLinkTable: false, keepAll: true, reportDir: 'playwright-report', reportFiles: 'index.html', reportName: 'Playwright HTML Report'])
+                publishHTML([
+                    allowMissing: false, 
+                    alwaysLinkToLastBuild: false, // FIXED: Corrected parameter name
+                    keepAll: true, 
+                    reportDir: 'playwright-report', 
+                    reportFiles: 'index.html', 
+                    reportName: 'Playwright HTML Report'
+                ])
             }
         }
     }
